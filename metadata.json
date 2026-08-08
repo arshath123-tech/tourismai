@@ -1,0 +1,6 @@
+{
+  "name": "Tourism AI",
+  "description": "Tourism AI Platform providing smart travel research, real-time safety assessments, interactive maps, and trip planning.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

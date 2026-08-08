@@ -32,7 +32,7 @@ export async function getNews(req: Request, res: Response) {
 }
 
 export async function researchTravel(req: Request, res: Response) {
-  const user = getEffectiveUser(req);
+  const user = await getEffectiveUser(req);
   const { destination = "Tokyo, Japan", travelStyle, countryContext } = req.body;
 
   const style = travelStyle || user.travelStyle || "Solo";
@@ -102,7 +102,7 @@ export async function researchTravel(req: Request, res: Response) {
 
     const ip = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "127.0.0.1";
     const agent = req.headers["user-agent"] || "Web Application";
-    logActivity(
+    await logActivity(
       user.id,
       user.username,
       "RESEARCH",
@@ -155,7 +155,7 @@ export async function researchTravel(req: Request, res: Response) {
 }
 
 export async function assessSafety(req: Request, res: Response) {
-  const user = getEffectiveUser(req);
+  const user = await getEffectiveUser(req);
   const { destination = "Kyoto, Japan", itineraryDetails = "Night walking tour & local transit" } = req.body;
   const nationality = user.nationality || "India";
 
@@ -214,7 +214,7 @@ ${dynamicEmergencyContacts['Tourist Hotline'] || dynamicEmergencyContacts['Touri
 
     const ip = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "127.0.0.1";
     const agent = req.headers["user-agent"] || "Web Application";
-    logActivity(
+    await logActivity(
       user.id,
       user.username,
       "ASSESSMENT",

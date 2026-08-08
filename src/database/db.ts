@@ -1,3 +1,5 @@
+import { Pool } from 'pg';
+import dotenv from 'dotenv';
 import {
   UserStore,
   ActivityStore,
@@ -6,50 +8,14 @@ import {
   ServiceHealthState
 } from './schema';
 
+dotenv.config();
+
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "adminpassword123";
 
-export const users: UserStore[] = [
-  {
-    id: "usr-admin-001",
-    username: ADMIN_USERNAME,
-    passwordHash: ADMIN_PASSWORD,
-    fullName: "System Administrator",
-    role: "ROLE_ADMIN",
-    nationality: "India",
-    travelStyle: "Business",
-    createdAt: new Date(Date.now() - 30 * 86400000).toISOString(),
-    email: "admin@tourism.ai",
-  },
-  {
-    id: "usr-traveller-001",
-    username: "traveller1",
-    passwordHash: "password123",
-    fullName: "Aarav Sharma",
-    role: "ROLE_TRAVELLER",
-    nationality: "India",
-    travelStyle: "Solo",
-    createdAt: new Date(Date.now() - 7 * 86400000).toISOString(),
-    email: "aarav@example.com",
-  },
-  {
-    id: "usr-traveller-002",
-    username: "wanderer_japan",
-    passwordHash: "password123",
-    fullName: "Kenji Sato",
-    role: "ROLE_TRAVELLER",
-    nationality: "Japan",
-    travelStyle: "Backpacker",
-    createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
-    email: "kenji@example.jp",
-  }
-];
-
-export const activities: ActivityStore[] = [];
-
-export const savedDestinations: SavedDestinationStore[] = [];
-
-export const chatMessages: ChatMessageStore[] = [];
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
 
 export const GUEST_USER: UserStore = {
   id: "guest-user",
@@ -74,7 +40,93 @@ export function updateServiceHealthState(newState: ServiceHealthState) {
   serviceHealthState = newState;
 }
 
-export function logActivity(
+export async function initializeDatabase() {
+  if (!process.env.DATABASE_URL) {
+    console.warn("[DB] No DATABASE_URL provided. Skipping initialization.");
+    return;
+  }
+  
+  const client = await pool.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id VARCHAR(255) PRIMARY KEY,
+        username VARCHAR(255) UNIQUE NOT NULL,
+        "passwordHash" VARCHAR(255) NOT NULL,
+        "fullName" VARCHAR(255) NOT NULL,
+        role VARCHAR(50) NOT NULL,
+        nationality VARCHAR(255) NOT NULL,
+        "travelStyle" VARCHAR(50) NOT NULL,
+        "createdAt" TIMESTAMP NOT NULL,
+        email VARCHAR(255) NOT NULL
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS activities (
+        id VARCHAR(255) PRIMARY KEY,
+        "travellerId" VARCHAR(255) NOT NULL,
+        username VARCHAR(255) NOT NULL,
+        "activityType" VARCHAR(255) NOT NULL,
+        details TEXT NOT NULL,
+        timestamp TIMESTAMP NOT NULL,
+        "ipAddress" VARCHAR(255) NOT NULL,
+        "sessionMetadata" TEXT
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS saved_destinations (
+        id VARCHAR(255) PRIMARY KEY,
+        "userId" VARCHAR(255) NOT NULL,
+        destination VARCHAR(255) NOT NULL,
+        country VARCHAR(255) NOT NULL,
+        "safetyRating" VARCHAR(50) NOT NULL,
+        notes TEXT,
+        "savedAt" TIMESTAMP NOT NULL,
+        tags JSONB
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id VARCHAR(255) PRIMARY KEY,
+        "conversationId" VARCHAR(255) NOT NULL,
+        "userId" VARCHAR(255) NOT NULL,
+        sender VARCHAR(50) NOT NULL,
+        text TEXT NOT NULL,
+        timestamp TIMESTAMP NOT NULL
+      );
+    `);
+
+    // Insert default admin if not exists
+    const adminCheck = await client.query('SELECT * FROM users WHERE username = $1', [ADMIN_USERNAME]);
+    if (adminCheck.rows.length === 0) {
+      await client.query(
+        'INSERT INTO users (id, username, "passwordHash", "fullName", role, nationality, "travelStyle", "createdAt", email) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
+        [
+          "usr-admin-001",
+          ADMIN_USERNAME,
+          ADMIN_PASSWORD,
+          "System Administrator",
+          "ROLE_ADMIN",
+          "India",
+          "Business",
+          new Date(Date.now() - 30 * 86400000).toISOString(),
+          "admin@tourism.ai"
+        ]
+      );
+    }
+
+    console.log("[DB] Tables initialized successfully.");
+  } catch (err) {
+    console.error("[DB] Error initializing database tables:", err);
+  } finally {
+    client.release();
+  }
+}
+
+export async function logActivity(
   travellerId: string,
   username: string,
   activityType: string,
@@ -82,7 +134,8 @@ export function logActivity(
   ipAddress: string,
   sessionMetadata: string
 ) {
-  const newLog: ActivityStore = {
+  if (!process.env.DATABASE_URL) return null;
+  const newLog = {
     id: `act-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
     travellerId,
     username,
@@ -93,7 +146,14 @@ export function logActivity(
     sessionMetadata: sessionMetadata.substring(0, 100)
   };
 
-  activities.unshift(newLog);
-  if (activities.length > 500) activities.pop();
-  return newLog;
+  try {
+    await pool.query(
+      'INSERT INTO activities (id, "travellerId", username, "activityType", details, timestamp, "ipAddress", "sessionMetadata") VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+      [newLog.id, newLog.travellerId, newLog.username, newLog.activityType, newLog.details, newLog.timestamp, newLog.ipAddress, newLog.sessionMetadata]
+    );
+    return newLog;
+  } catch (err) {
+    console.error("Error logging activity", err);
+    return null;
+  }
 }

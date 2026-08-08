@@ -3,13 +3,15 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import { createBackendApp } from "./src/backend/app";
+import { initializeDatabase } from "./src/database/db";
 
 dotenv.config();
 
-const PORT = 3000;
+const PORT = parseInt(process.env.PORT || "3000", 10);
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
 
 async function startServer() {
+  await initializeDatabase();
   // Initialize backend Express application
   const app = createBackendApp();
 

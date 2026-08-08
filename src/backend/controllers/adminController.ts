@@ -1,71 +1,97 @@
 import { Request, Response } from "express";
 import { AuthenticatedRequest } from "../middleware/auth";
 import {
-  users,
-  activities,
+  pool,
   serviceHealthState,
   updateServiceHealthState,
   logActivity
 } from "../../database/db";
-import { UserStore } from "../../database/schema";
+import { UserStore, ActivityStore } from "../../database/schema";
 import { isAiAvailable } from "../services/aiService";
 
-export function getAdminDashboard(req: AuthenticatedRequest, res: Response) {
-  const travellerCount = users.filter(u => u.role === "ROLE_TRAVELLER").length;
-  const activitiesToday = activities.filter(a => new Date(a.timestamp) > new Date(Date.now() - 86400000)).length;
-  const assessmentsCount = activities.filter(a => a.activityType === "ASSESSMENT").length;
+export async function getAdminDashboard(req: AuthenticatedRequest, res: Response) {
+  try {
+    const travellerCountRes = await pool.query("SELECT COUNT(*) FROM users WHERE role = 'ROLE_TRAVELLER'");
+    const activitiesTodayRes = await pool.query("SELECT COUNT(*) FROM activities WHERE timestamp > NOW() - INTERVAL '1 day'");
+    const assessmentsCountRes = await pool.query("SELECT COUNT(*) FROM activities WHERE \"activityType\" = 'ASSESSMENT'");
+    const recentActivitiesRes = await pool.query("SELECT * FROM activities ORDER BY timestamp DESC LIMIT 10");
+    const travellersListRes = await pool.query("SELECT * FROM users");
 
-  return res.json({
-    stats: {
-      totalTravellers: travellerCount,
-      totalActivitiesToday: activitiesToday,
-      activeSafetyAssessments: assessmentsCount,
-      systemHealthScore: 99.8
-    },
-    services: [
-      {
-        name: "Tourism AI Engine / Open AI Chat API",
-        key: "spring_ai",
-        status: serviceHealthState.spring_ai.status,
-        latencyMs: serviceHealthState.spring_ai.latencyMs,
-        uptimePercent: serviceHealthState.spring_ai.uptimePercent,
-        lastChecked: serviceHealthState.spring_ai.lastChecked,
-        endpoint: "/api/chat & /api/travel/research",
-        details: isAiAvailable() ? "GoogleGenAI Model (gemini-3.6-flash) Operational" : "AI Intelligence Fallback Engine Operational"
+    const travellerCount = parseInt(travellerCountRes.rows[0].count, 10);
+    const activitiesToday = parseInt(activitiesTodayRes.rows[0].count, 10);
+    const assessmentsCount = parseInt(assessmentsCountRes.rows[0].count, 10);
+
+    return res.json({
+      stats: {
+        totalTravellers: travellerCount,
+        totalActivitiesToday: activitiesToday,
+        activeSafetyAssessments: assessmentsCount,
+        systemHealthScore: 99.8
       },
-      {
-        name: "Real-Time Weather Service API",
-        key: "weather_api",
-        status: serviceHealthState.weather_api.status,
-        latencyMs: serviceHealthState.weather_api.latencyMs,
-        uptimePercent: serviceHealthState.weather_api.uptimePercent,
-        lastChecked: serviceHealthState.weather_api.lastChecked,
-        endpoint: "/api/weather",
-        details: "Live global weather telemetry active"
-      },
-      {
-        name: "Live Global News Service API",
-        key: "news_api",
-        status: serviceHealthState.news_api.status,
-        latencyMs: serviceHealthState.news_api.latencyMs,
-        uptimePercent: serviceHealthState.news_api.uptimePercent,
-        lastChecked: serviceHealthState.news_api.lastChecked,
-        endpoint: "/api/news",
-        details: "Regional travel disruption news feed operational"
-      },
-      {
-        name: "Database Connection Pool (PostgreSQL)",
-        key: "postgres_db",
-        status: serviceHealthState.postgres_db.status,
-        latencyMs: serviceHealthState.postgres_db.latencyMs,
-        uptimePercent: serviceHealthState.postgres_db.uptimePercent,
-        lastChecked: serviceHealthState.postgres_db.lastChecked,
-        endpoint: "jdbc:postgresql://localhost:5432/tourism_ai",
-        details: "Active Pool: 10 connections, Idle: 8, Waiting: 0"
-      }
-    ],
-    recentActivities: activities.slice(0, 10),
-    travellersList: users.map(u => ({
+      services: [
+        {
+          name: "Tourism AI Engine / Open AI Chat API",
+          key: "spring_ai",
+          status: serviceHealthState.spring_ai.status,
+          latencyMs: serviceHealthState.spring_ai.latencyMs,
+          uptimePercent: serviceHealthState.spring_ai.uptimePercent,
+          lastChecked: serviceHealthState.spring_ai.lastChecked,
+          endpoint: "/api/chat & /api/travel/research",
+          details: isAiAvailable() ? "GoogleGenAI Model (gemini-3.6-flash) Operational" : "AI Intelligence Fallback Engine Operational"
+        },
+        {
+          name: "Real-Time Weather Service API",
+          key: "weather_api",
+          status: serviceHealthState.weather_api.status,
+          latencyMs: serviceHealthState.weather_api.latencyMs,
+          uptimePercent: serviceHealthState.weather_api.uptimePercent,
+          lastChecked: serviceHealthState.weather_api.lastChecked,
+          endpoint: "/api/weather",
+          details: "Live global weather telemetry active"
+        },
+        {
+          name: "Live Global News Service API",
+          key: "news_api",
+          status: serviceHealthState.news_api.status,
+          latencyMs: serviceHealthState.news_api.latencyMs,
+          uptimePercent: serviceHealthState.news_api.uptimePercent,
+          lastChecked: serviceHealthState.news_api.lastChecked,
+          endpoint: "/api/news",
+          details: "Regional travel disruption news feed operational"
+        },
+        {
+          name: "Database Connection Pool (PostgreSQL)",
+          key: "postgres_db",
+          status: serviceHealthState.postgres_db.status,
+          latencyMs: serviceHealthState.postgres_db.latencyMs,
+          uptimePercent: serviceHealthState.postgres_db.uptimePercent,
+          lastChecked: serviceHealthState.postgres_db.lastChecked,
+          endpoint: "jdbc:postgresql://localhost:5432/tourism_ai",
+          details: "Active Pool: 10 connections, Idle: 8, Waiting: 0"
+        }
+      ],
+      recentActivities: recentActivitiesRes.rows,
+      travellersList: travellersListRes.rows.map(u => ({
+        id: u.id,
+        username: u.username,
+        fullName: u.fullName,
+        role: u.role,
+        nationality: u.nationality,
+        travelStyle: u.travelStyle,
+        createdAt: u.createdAt,
+        email: u.email
+      }))
+    });
+  } catch (error) {
+    console.error("Dashboard Error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+export async function getTravellers(req: Request, res: Response) {
+  try {
+    const result = await pool.query("SELECT * FROM users");
+    const travellerList = result.rows.map(u => ({
       id: u.id,
       username: u.username,
       fullName: u.fullName,
@@ -74,25 +100,14 @@ export function getAdminDashboard(req: AuthenticatedRequest, res: Response) {
       travelStyle: u.travelStyle,
       createdAt: u.createdAt,
       email: u.email
-    }))
-  });
+    }));
+    return res.json(travellerList);
+  } catch (error) {
+    return res.status(500).json({ error: "Internal server error" });
+  }
 }
 
-export function getTravellers(req: Request, res: Response) {
-  const travellerList = users.map(u => ({
-    id: u.id,
-    username: u.username,
-    fullName: u.fullName,
-    role: u.role,
-    nationality: u.nationality,
-    travelStyle: u.travelStyle,
-    createdAt: u.createdAt,
-    email: u.email
-  }));
-  return res.json(travellerList);
-}
-
-export function createTraveller(req: AuthenticatedRequest, res: Response) {
+export async function createTraveller(req: AuthenticatedRequest, res: Response) {
   const adminUser = req.user!;
   const { username, password, fullName, nationality, travelStyle, email } = req.body;
 
@@ -100,105 +115,123 @@ export function createTraveller(req: AuthenticatedRequest, res: Response) {
     return res.status(400).json({ error: "Username, password, and mandatory Nationality are required." });
   }
 
-  const existing = users.find(u => u.username.toLowerCase() === username.toLowerCase());
-  if (existing) {
-    return res.status(400).json({ error: "Traveller with this username already exists." });
-  }
-
-  const newTraveller: UserStore = {
-    id: `usr-traveller-${Date.now()}`,
-    username,
-    passwordHash: password,
-    fullName: fullName || username,
-    role: "ROLE_TRAVELLER",
-    nationality,
-    travelStyle: travelStyle || "Solo",
-    createdAt: new Date().toISOString(),
-    email: email || `${username}@tourism.ai`
-  };
-
-  users.push(newTraveller);
-
-  const ip = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "127.0.0.1";
-  const agent = req.headers["user-agent"] || "Web Application";
-  logActivity(
-    adminUser.id,
-    adminUser.username,
-    "ADMIN_ACTION",
-    `Admin created new traveller account: ${username} (${nationality})`,
-    ip,
-    agent
-  );
-
-  return res.status(201).json({
-    message: "Traveller account created successfully",
-    traveller: {
-      id: newTraveller.id,
-      username: newTraveller.username,
-      fullName: newTraveller.fullName,
-      role: newTraveller.role,
-      nationality: newTraveller.nationality,
-      travelStyle: newTraveller.travelStyle,
-      createdAt: newTraveller.createdAt,
-      email: newTraveller.email
+  try {
+    const existing = await pool.query("SELECT * FROM users WHERE LOWER(username) = LOWER($1)", [username]);
+    if (existing.rows.length > 0) {
+      return res.status(400).json({ error: "Traveller with this username already exists." });
     }
-  });
+
+    const newTraveller: UserStore = {
+      id: `usr-traveller-${Date.now()}`,
+      username,
+      passwordHash: password,
+      fullName: fullName || username,
+      role: "ROLE_TRAVELLER",
+      nationality,
+      travelStyle: travelStyle || "Solo",
+      createdAt: new Date().toISOString(),
+      email: email || `${username}@tourism.ai`
+    };
+
+    await pool.query(
+      'INSERT INTO users (id, username, "passwordHash", "fullName", role, nationality, "travelStyle", "createdAt", email) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
+      [newTraveller.id, newTraveller.username, newTraveller.passwordHash, newTraveller.fullName, newTraveller.role, newTraveller.nationality, newTraveller.travelStyle, newTraveller.createdAt, newTraveller.email]
+    );
+
+    const ip = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "127.0.0.1";
+    const agent = req.headers["user-agent"] || "Web Application";
+    await logActivity(
+      adminUser.id,
+      adminUser.username,
+      "ADMIN_ACTION",
+      `Admin created new traveller account: ${username} (${nationality})`,
+      ip,
+      agent
+    );
+
+    return res.status(201).json({
+      message: "Traveller account created successfully",
+      traveller: {
+        id: newTraveller.id,
+        username: newTraveller.username,
+        fullName: newTraveller.fullName,
+        role: newTraveller.role,
+        nationality: newTraveller.nationality,
+        travelStyle: newTraveller.travelStyle,
+        createdAt: newTraveller.createdAt,
+        email: newTraveller.email
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({ error: "Internal server error" });
+  }
 }
 
-export function deleteTraveller(req: AuthenticatedRequest, res: Response) {
+export async function deleteTraveller(req: AuthenticatedRequest, res: Response) {
   const adminUser = req.user!;
   const { id } = req.params;
 
-  const targetIndex = users.findIndex(u => u.id === id);
-  if (targetIndex === -1) {
-    return res.status(404).json({ error: "Traveller account not found." });
+  try {
+    const targetResult = await pool.query("SELECT * FROM users WHERE id = $1", [id]);
+    if (targetResult.rows.length === 0) {
+      return res.status(404).json({ error: "Traveller account not found." });
+    }
+
+    const targetUser = targetResult.rows[0];
+    if (targetUser.role === "ROLE_ADMIN") {
+      return res.status(403).json({ error: "Cannot delete Administrator accounts." });
+    }
+
+    await pool.query("DELETE FROM users WHERE id = $1", [id]);
+
+    const ip = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "127.0.0.1";
+    const agent = req.headers["user-agent"] || "Web Application";
+    await logActivity(
+      adminUser.id,
+      adminUser.username,
+      "ADMIN_ACTION",
+      `Admin deleted traveller account: ${targetUser.username} (ID: ${id})`,
+      ip,
+      agent
+    );
+
+    return res.json({ message: "Traveller account removed successfully", deletedId: id });
+  } catch (error) {
+    return res.status(500).json({ error: "Internal server error" });
   }
-
-  const targetUser = users[targetIndex];
-  if (targetUser.role === "ROLE_ADMIN") {
-    return res.status(403).json({ error: "Cannot delete Administrator accounts." });
-  }
-
-  users.splice(targetIndex, 1);
-
-  const ip = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "127.0.0.1";
-  const agent = req.headers["user-agent"] || "Web Application";
-  logActivity(
-    adminUser.id,
-    adminUser.username,
-    "ADMIN_ACTION",
-    `Admin deleted traveller account: ${targetUser.username} (ID: ${id})`,
-    ip,
-    agent
-  );
-
-  return res.json({ message: "Traveller account removed successfully", deletedId: id });
 }
 
-export function getActivities(req: Request, res: Response) {
+export async function getActivities(req: Request, res: Response) {
   const { travellerId, activityType, search } = req.query;
 
-  let filtered = [...activities];
+  try {
+    let query = "SELECT * FROM activities WHERE 1=1";
+    const params: any[] = [];
+    let paramCount = 1;
 
-  if (travellerId) {
-    filtered = filtered.filter(a => a.travellerId === travellerId);
-  }
-  if (activityType) {
-    filtered = filtered.filter(a => a.activityType.toUpperCase() === (activityType as string).toUpperCase());
-  }
-  if (search) {
-    const q = (search as string).toLowerCase();
-    filtered = filtered.filter(a => 
-      a.username.toLowerCase().includes(q) || 
-      a.details.toLowerCase().includes(q) ||
-      a.activityType.toLowerCase().includes(q)
-    );
-  }
+    if (travellerId) {
+      query += ` AND "travellerId" = $${paramCount++}`;
+      params.push(travellerId);
+    }
+    if (activityType) {
+      query += ` AND UPPER("activityType") = UPPER($${paramCount++})`;
+      params.push(activityType);
+    }
+    if (search) {
+      query += ` AND (LOWER(username) LIKE LOWER($${paramCount}) OR LOWER(details) LIKE LOWER($${paramCount}) OR LOWER("activityType") LIKE LOWER($${paramCount}))`;
+      params.push(`%${search}%`);
+      paramCount++;
+    }
 
-  return res.json(filtered);
+    query += " ORDER BY timestamp DESC LIMIT 500";
+    const result = await pool.query(query, params);
+    return res.json(result.rows);
+  } catch (error) {
+    return res.status(500).json({ error: "Internal server error" });
+  }
 }
 
-export function getApiMonitor(req: Request, res: Response) {
+export async function getApiMonitor(req: Request, res: Response) {
   return res.json({
     timestamp: new Date().toISOString(),
     services: [
@@ -268,7 +301,7 @@ export async function runSyntheticHealthTest(req: AuthenticatedRequest, res: Res
 
   const ip = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "127.0.0.1";
   const agent = req.headers["user-agent"] || "Web Application";
-  logActivity(
+  await logActivity(
     adminUser.id,
     adminUser.username,
     "ADMIN_ACTION",
@@ -311,7 +344,7 @@ export async function runSyntheticHealthTest(req: AuthenticatedRequest, res: Res
   });
 }
 
-export function updateUserRole(req: AuthenticatedRequest, res: Response) {
+export async function updateUserRole(req: AuthenticatedRequest, res: Response) {
   const adminUser = req.user!;
   const { userId } = req.params;
   const { newRole } = req.body;
@@ -320,32 +353,38 @@ export function updateUserRole(req: AuthenticatedRequest, res: Response) {
     return res.status(400).json({ error: "Role must be 'ROLE_ADMIN' or 'ROLE_TRAVELLER'." });
   }
 
-  const target = users.find(u => u.id === userId);
-  if (!target) {
-    return res.status(404).json({ error: "User not found." });
-  }
-
-  target.role = newRole;
-
-  const ip = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "127.0.0.1";
-  const agent = req.headers["user-agent"] || "Web Application";
-  logActivity(
-    adminUser.id,
-    adminUser.username,
-    "ADMIN_ACTION",
-    `Changed role of user ${target.username} to ${newRole}`,
-    ip,
-    agent
-  );
-
-  return res.json({
-    message: `User ${target.username} role updated to ${newRole}`,
-    user: {
-      id: target.id,
-      username: target.username,
-      fullName: target.fullName,
-      role: target.role,
-      nationality: target.nationality
+  try {
+    const targetResult = await pool.query("SELECT * FROM users WHERE id = $1", [userId]);
+    if (targetResult.rows.length === 0) {
+      return res.status(404).json({ error: "User not found." });
     }
-  });
+    const target = targetResult.rows[0];
+
+    await pool.query("UPDATE users SET role = $1 WHERE id = $2", [newRole, userId]);
+    target.role = newRole;
+
+    const ip = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "127.0.0.1";
+    const agent = req.headers["user-agent"] || "Web Application";
+    await logActivity(
+      adminUser.id,
+      adminUser.username,
+      "ADMIN_ACTION",
+      `Changed role of user ${target.username} to ${newRole}`,
+      ip,
+      agent
+    );
+
+    return res.json({
+      message: `User ${target.username} role updated to ${newRole}`,
+      user: {
+        id: target.id,
+        username: target.username,
+        fullName: target.fullName,
+        role: target.role,
+        nationality: target.nationality
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({ error: "Internal server error" });
+  }
 }

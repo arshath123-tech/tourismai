@@ -73,14 +73,15 @@ export function AiAssistantTab({
   }, [activeDestination]);
 
   useEffect(() => {
+    let isMounted = true;
     async function loadHistory() {
       try {
         const history = await fetchChatHistoryApi(conversationId);
         if (Array.isArray(history) && history.length > 0) {
-          setMessages(history);
+          if (isMounted) setMessages(history);
         } else {
           // Default initial greeting
-          setMessages([
+          if (isMounted) setMessages([
             {
               id: 'msg-init',
               conversationId,
@@ -99,9 +100,21 @@ export function AiAssistantTab({
         }
       } catch (err) {
         console.error('Failed to load chat history:', err);
+        if (isMounted) {
+          setMessages([
+            {
+              id: `err-init-${Date.now()}`,
+              conversationId,
+              sender: 'assistant',
+              text: `⚠️ **Something went wrong.** Kindly check your internet connection and try again.`,
+              timestamp: new Date().toISOString()
+            }
+          ]);
+        }
       }
     }
     loadHistory();
+    return () => { isMounted = false; };
   }, [conversationId, user, activeCountry]);
 
   useEffect(() => {
